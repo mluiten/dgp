@@ -1,0 +1,3 @@
+[submodule "clojure-hadoop"]
+	path = clojure-hadoop
+	url = git://github.com/eslick/clojure-hadoop.git
