@@ -18,15 +18,17 @@
 (ns dgp.mapred
   (:require [clojure-hadoop.wrap :as wrap]
             [clojure-hadoop.defjob :as defjob]
-            [clojure-hadoop.imports :as imp])
-  (:import (java.util StringTokenizer))
-  (:use clojure.contrib.math clojure.test clojure-hadoop.job dgp.main))
+            [clojure-hadoop.imports :as imp]
+            [clojure-hadoop.context :as ctx])
+  (:import (java.util StringTokenizer)
+           (org.dgp RandomInputFormat))
+  (:use clojure.contrib.math clojure.test clojure-hadoop.flow clojure-hadoop.job dgp.main))
 
 (imp/import-io)
 (imp/import-mapreduce)
 
-(def *individuals-per-mapper* 10)
-(def *tournaments* 50)
+(def *individuals-per-mapper* 1000)
+(def *tournaments* 2500)
 
 (def *operations* [
     {:action 'mutate :p 0.2}
@@ -38,9 +40,9 @@
     "Mapper which generates (a large number of) individuals per mapper"
     [key value]
     (let [depth 4 width 2]
-      (repeatedly
+      (vec (repeatedly
          *individuals-per-mapper*
-         #(gentree-new depth width))))
+         #(vec [(rand *tournaments*) (str (gentree-new depth width))])))))
 
 (defn dgp-map-evaluate
   [offset individual]
@@ -64,10 +66,18 @@
             (let [p (rand)]
                (cond 
                  (and (< 0.15 p 0.55) (>= (count values) 2)) 
-                    [['? (apply crossover-new (map #(read-string (second %)) (take 2 (sort values))))]]
+                   (do
+                    (ctx/increment-counter "GP Operations" "Crossover")
+                    [['? (apply crossover-new (map #(read-string (second %)) (take 2 (sort values))))]])
                  (< p 0.15)
-                    [['? (mutate-new (read-string (second (first (sort values)))) :depth 3)]]
-                 :else (sort values))))))
+                   (do
+                    (ctx/increment-counter "GP Operations" "Mutation")
+                    [['? (mutate-new (read-string (second (first (sort values)))) :depth 3)]])
+                 :else
+                   (do
+                    (ctx/increment-counter "GP Operations" "Survival")
+                    (sort values)))))))
+
 
 (defn long-string-writer [^TaskInputOutputContext context key value]
   (.write context (LongWritable. key) (Text. value)))
@@ -87,34 +97,46 @@
   :reduce dgp-reduce
   :reduce-reader long-string-reduce-reader
   :reduce-writer long-string-writer
-;  :reduce :identity
-;  :reduce-reader long-string-reduce-reader
   :input-format :text
   :output-format :text
   :compress-output false)
 
-;(define-step evaluate-step []
-;    :map dgp-map-evaluate
-;    :sink :text
-;    :reduce :none)
+(define-source :my-text [input]
+  :input-format :text
+  :input input
+  :map-reader wrap/string-map-reader)
+
+(define-source :random []
+    :input-format RandomInputFormat
+    :map-reader wrap/clojure-map-reader
+    :map-writer wrap/clojure-writer)
+
+(define-step generate-population-step []
+    :source :random
+    :map dgp-map-generate-individuals
+    :sink (:text "/tmp/generate_test")
+    :reduce :identity)
+
+(define-step evaluate-step []
+    :source (:my-text "/tmp/generate_test")
+    :map dgp-map-evaluate
+    :sink (:text "/tmp/flow_test")
+    :reduce dgp-reduce)
 ;
 ;(define-step order-evaluation []
 ;    :map :identity
 ;    :sink :text
 ;    :reduce :identity)
 ;
-;(define-flow dgp-total []
-;    (do-step evaluate-step
-    ;         crossover-step
-    ;         mutate-step
-    ;         generate-step
-;             order-evaluation))
+(define-flow dgp-total []
+    (do (do-step generate-population-step)
+        (do-step evaluate-step)))
 
 (defjob/defjob generation-job
   :map dgp-map-generate-individuals
   :map-reader wrap/clojure-map-reader
   :map-writer wrap/clojure-writer
   :reduce :identity
-  :input-format "org.apache.hadoop.examples.RandomWriter$RandomInputFormat"
+  :input-format RandomInputFormat
   :output-format :text
   :compress-output false)
