@@ -28,7 +28,7 @@
 (imp/import-mapreduce)
 
 (def *individuals-per-mapper* 1000)
-(def *tournaments* 2500)
+(def *tournaments* 1000)
 
 (def *operations* [
     {:action 'mutate :p 0.2}
@@ -42,42 +42,46 @@
     (let [depth 4 width 2]
       (vec (repeatedly
          *individuals-per-mapper*
-         #(vec [(rand *tournaments*) (str (gentree-new depth width))])))))
+         #(vec [(str (gentree-new depth width)) 1])))))
+
+(defn objective-fn
+  [individual]
+  (reduce +
+      (map (fn [i] (expt (-
+                           (- (+ 5 (* i i) (+ i i)) i 8)   ; Find this function :-)
+                           (evaluate-new (if (string? individual) (read-string individual) individual) {:a i :b 2 :c 8}))
+                         2))
+          (range 10))))
 
 (defn dgp-map-evaluate
   [offset individual]
   "Map evaluates the given individual with the training set and assigns a tournament
   number, so we basicly do tournament selection. The reducer can than decide what to
   do with a certain tournament as to evolve the population"
-  [[(rand *tournaments*)
-    (str [(reduce +
-              (map (fn [i] (expt (-
-                                   (- (+ 3 (* i i)) i)   ; Find this function :-)
-                                   (evaluate-new individual {:a i :b 2 :c 8}))
-                                 2))
-                  (range 10)))
-          (str individual)])]])
+  (do 
+    [[(rand-int *tournaments*)
+     (str [(objective-fn individual)
+          (str individual)])]]))
 
 (defn dgp-reduce [key values]
   "First selects which kind of operation should be executed on this tournament. Then
   finds the best candidates from the pool and performs crossover, mutation, or whatever
   operation is selected."
-  (vec (map #(vec [key (str %)])
+  (let [sorted-values (sort values)]
+  (vec (map #(vec [% 1])
             (let [p (rand)]
-               (cond 
-                 (and (< 0.15 p 0.55) (>= (count values) 2)) 
+              (conj (map second sorted-values)
+                (cond 
+                 (and (< 0.15 p 0.50) (>= (count values) 2)) 
                    (do
                     (ctx/increment-counter "GP Operations" "Crossover")
-                    [['? (apply crossover-new (map #(read-string (second %)) (take 2 (sort values))))]])
+                    [(apply crossover-new (map #(nth % 1 (first %)) (take 2 sorted-values))) -1])
                  (< p 0.15)
                    (do
                     (ctx/increment-counter "GP Operations" "Mutation")
-                    [['? (mutate-new (read-string (second (first (sort values)))) :depth 3)]])
+                    [(mutate-new (nth (first sorted-values) 1 (first (first sorted-values))) :depth 3) -1])
                  :else
-                   (do
-                    (ctx/increment-counter "GP Operations" "Survival")
-                    (sort values)))))))
-
+                    (ctx/increment-counter "GP Operations" "Survival"))))))))
 
 (defn long-string-writer [^TaskInputOutputContext context key value]
   (.write context (LongWritable. key) (Text. value)))
@@ -104,24 +108,34 @@
 (define-source :my-text [input]
   :input-format :text
   :input input
-  :map-reader wrap/string-map-reader)
+  :map-reader wrap/clojure-map-reader)
 
 (define-source :random []
     :input-format RandomInputFormat
     :map-reader wrap/clojure-map-reader
     :map-writer wrap/clojure-writer)
 
+(define-shuffle :long-string []
+    :map-writer long-string-writer
+    :map-output-key LongWritable
+    :reduce-reader long-string-reduce-reader)
+
 (define-step generate-population-step []
     :source :random
     :map dgp-map-generate-individuals
     :sink (:text "/tmp/generate_test")
-    :reduce :identity)
+    :replace true
+    :compress-output false
+    :reduce :none)
 
 (define-step evaluate-step []
     :source (:my-text "/tmp/generate_test")
     :map dgp-map-evaluate
     :sink (:text "/tmp/flow_test")
-    :reduce dgp-reduce)
+    :replace true                   ; Should generate a new dir for each generation
+    :shuffle :long-string
+    :reduce dgp-reduce
+    :compress-output false)
 ;
 ;(define-step order-evaluation []
 ;    :map :identity
@@ -130,6 +144,7 @@
 ;
 (define-flow dgp-total []
     (do (do-step generate-population-step)
+        (do-step evaluate-step)
         (do-step evaluate-step)))
 
 (defjob/defjob generation-job
