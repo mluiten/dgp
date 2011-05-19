@@ -150,7 +150,6 @@
 ;
 (define-flow dgp-total []
     (do (do-step generate-population-step)
-        (do-step evaluate-step)
         (do-step evaluate-step)))
 
 (defjob/defjob generation-job

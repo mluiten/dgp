@@ -3,7 +3,7 @@
             [clojure.contrib.io :as io]))
 
 (def *operators* `[- + *])
-(def *terminators* (conj (range 1 5) :a :b))
+(def *terminators* (conj (range 1 9) :a :b))
 
 (defn count-terminals
     "Counts the number of terminals in a program"
@@ -35,6 +35,7 @@
        :args (vec (map (fn [_] (gentree-new width max-depth program (inc depth))) (range width)))})))
 
 (defn program-zip
+    "Zippers an individual program into a traversable tree"
     [program]
     (zip/zipper
         #(vector? (:args %))
