@@ -50,7 +50,7 @@ public class RandomInputFormat extends InputFormat<Text, Text> {
      */
     @Override
     public List<InputSplit> getSplits(JobContext job) throws IOException {
-      int numSplits = 100;
+      int numSplits = 10;
       ArrayList<InputSplit> result = new ArrayList<InputSplit>(numSplits);
       Path outDir = FileOutputFormat.getOutputPath(job);
       for(int i=0; i < numSplits; ++i) {
