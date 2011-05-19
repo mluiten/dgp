@@ -89,37 +89,3 @@
 (defn generate-population-to-file
     [outfile size depth width]
     (dotimes [n size] (spit outfile (str (gentree-new depth width) "\n") :append true)))
-
-;(defn gentree
-;    "Generates a tree with specified depth and width in prefix notation
-;    e.g. (+ (- 1 2) (* 3 4))
-;    
-;    TODO: needs variable width per operator"
-;    [tree depth width]
-;    (if (zero? depth)
-;        (vec (concat tree (repeatedly width #(rand-nth terminals))))
-;        (vec (map (fn [_] (conj (gentree tree (dec depth) width)
-;                     (rand-nth operators)))
-;             (range width)))))
-;
-;(defn gentree-wrapper
-;    "We should not need this. But the first operator from gentree is missing."
-;    [tree depth width]
-;    (-> (zip/seq-zip (gentree tree depth width)) zip/down zip/node))
-;
-;(defn mutate
-;    "Mutates the given tree by replacing a random node with some small
-;    probability by a newly generated tree with reasonable depth"
-;    [tree & {:keys [mutation_rate max-mutations depth width]
-;             :or   {mutation_rate 0.03 max-mutations 2 depth 2 width 2}}]
-;    (loop [zipped (zip/seq-zip tree)
-;           remaining max-mutations]
-;        (if (zip/end? zipped)
-;          (-> zipped zip/root)
-;          ; Decide whether to mutate or not
-;          (if (and (> remaining 0) (< (rand) mutation_rate))
-;              (recur (zip/next
-;                  (zip/replace zipped (gentree [] depth width)))
-;                  (dec remaining))
-;              (recur (zip/next zipped) remaining)))))
-
