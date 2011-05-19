@@ -42,7 +42,7 @@
     (let [depth 4 width 2]
       (vec (repeatedly
          *individuals-per-mapper*
-         #(vec [(str (gentree-new depth width)) 1])))))
+         #(vec [(str (gentree-new width depth)) 1])))))
 
 (defn objective-fn
   [individual]

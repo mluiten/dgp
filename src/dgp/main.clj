@@ -26,13 +26,13 @@
       :else program))
 
 (defn gentree-new
-    ([depth width] (gentree-new depth width (vector)))
-    ([depth width program]
-    (if (= 0 (rand-int (* 2 depth)))
+    ([width max-depth] (gentree-new width max-depth (vector) 0))
+    ([width max-depth program depth]
+    (if (or (>= depth max-depth) (= 0 (rand-int (* 2 (- max-depth depth)))))
       (rand-nth *terminators*)
       {:fn (rand-nth *operators*)
        :depth depth
-       :args (vec (map (fn [_] (gentree-new (dec depth) width program)) (range width)))})))
+       :args (vec (map (fn [_] (gentree-new width max-depth program (inc depth))) (range width)))})))
 
 (defn program-zip
     [program]
@@ -45,19 +45,16 @@
 (defn mutate-new
     [tree & {:keys [mutation_rate max-mutations depth width]
              :or   {mutation_rate 0.15 max-mutations 2 depth 2 width 2}}]
-    (let [root-depth (:depth tree)]
-      (loop [zipped (program-zip tree)
+    (loop [zipped (program-zip tree)
              remaining max-mutations]
         (if (zip/end? zipped)
           (zip/root zipped)
           ; Decide whether to mutate the subtree
           (if (and (> remaining 0) (< (rand) mutation_rate))
-              (do
-                (println "Mutating node " (zip/node zipped))
-                (recur (zip/next
+              (recur (zip/next
                   (zip/replace zipped (gentree-new ((fnil max 0) (:depth (zip/node zipped)) 0) width)))
-                  (dec remaining)))
-              (recur (zip/next zipped) remaining))))))
+                  (dec remaining))
+              (recur (zip/next zipped) remaining)))))
 
 (defn flatten-program
     [program]
