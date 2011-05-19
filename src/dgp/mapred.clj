@@ -19,7 +19,8 @@
   (:require [clojure-hadoop.wrap :as wrap]
             [clojure-hadoop.defjob :as defjob]
             [clojure-hadoop.imports :as imp]
-            [clojure-hadoop.context :as ctx])
+            [clojure-hadoop.context :as ctx]
+            [clojure.contrib.duck-streams :as ds])
   (:import (java.util StringTokenizer)
            (org.dgp RandomInputFormat))
   (:use clojure.contrib.math clojure.test clojure-hadoop.flow clojure-hadoop.job dgp.main))
@@ -68,20 +69,25 @@
   finds the best candidates from the pool and performs crossover, mutation, or whatever
   operation is selected."
   (let [sorted-values (sort values)]
-  (vec (map #(vec [% 1])
-            (let [p (rand)]
-              (conj (map second sorted-values)
-                (cond 
-                 (and (< 0.15 p 0.50) (>= (count values) 2)) 
-                   (do
-                    (ctx/increment-counter "GP Operations" "Crossover")
-                    [(apply crossover-new (map #(nth % 1 (first %)) (take 2 sorted-values))) -1])
-                 (< p 0.15)
-                   (do
-                    (ctx/increment-counter "GP Operations" "Mutation")
-                    [(mutate-new (nth (first sorted-values) 1 (first (first sorted-values))) :depth 3) -1])
-                 :else
-                    (ctx/increment-counter "GP Operations" "Survival"))))))))
+  (do 
+    (ds/with-out-append-writer "best.txt"
+      (println (first sorted-values)))
+    (vec (let [p (rand)]
+      (cond 
+         (and (< 0.15 p 0.50) (>= (count values) 2)) 
+          (conj sorted-values
+           (do
+            (ctx/increment-counter "GP Operations" "Crossover")
+            [-1 (str (apply crossover-new (map #(read-string (second %)) (take 2 sorted-values))))]))
+         (< p 0.15)
+          (conj sorted-values
+           (do
+            (ctx/increment-counter "GP Operations" "Mutation")
+            [-1 (str (mutate-new (read-string (second (first sorted-values))) :depth 3))]))
+         :else
+           (do
+            (ctx/increment-counter "GP Operations" "Survival")
+            sorted-values)))))))
 
 (defn long-string-writer [^TaskInputOutputContext context key value]
   (.write context (LongWritable. key) (Text. value)))

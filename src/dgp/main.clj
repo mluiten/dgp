@@ -58,12 +58,12 @@
 
 (defn flatten-program
     [program]
-    (loop [fp (zip/next (program-zip program))
+    (loop [fp (program-zip program)
            nodelist (vector)]
       (if (zip/end? fp)
        nodelist
        (recur (zip/next fp) (conj nodelist fp)))))
-
+    
 (defn random-subtree
     [program]
     (zip/node (rand-nth (flatten-program program))))
@@ -73,16 +73,13 @@
     Still needs to handle the case where depths are different"
     [mommy daddy & {:keys [mutation_rate]
                     :or   {mutation_rate 0.25}}]
-    (let [root-depth (:depth mommy)]
-      (loop [zipped (program-zip mommy)]
+    (loop [zipped (program-zip mommy)]
         (if (zip/end? zipped)
-           (zip/root zipped)
-           (if (and (not= (:depth (zip/node zipped)) root-depth) (< (rand) mutation_rate))
-              (do
-                (println "Crossover node " (zip/node zipped))
-                (recur (zip/next
-                  (zip/replace zipped (random-subtree daddy)))))
-              (recur (zip/next zipped)))))))
+            (zip/root zipped)
+            (if (< (rand) mutation_rate)
+              (recur (zip/next
+                  (zip/replace zipped (random-subtree daddy))))
+              (recur (zip/next zipped))))))
 
 (defn generate-population
     [size depth width]
