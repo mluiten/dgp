@@ -2,8 +2,15 @@
   (:require [clojure.zip :as zip]
             [clojure.contrib.io :as io]))
 
-(def *operators* `[- + *])
-(def *terminators* (conj (range 1 9) :a :b))
+(defn log
+    [arg]
+    (Math/log arg))
+
+(def *operators* `[{:fn - :min-arity 2}
+                   {:fn + :min-arity 2}
+                   {:fn * :min-arity 2}])
+
+(def *terminals* (conj (range 1 9) :a :b))
 
 (defn count-terminals
     "Counts the number of terminals in a program"
@@ -14,6 +21,12 @@
     "Counts the number of operators in a program"
     [program]
     (count (filter #(ifn? %) (flatten program))))
+
+(defn take-random [n coll]
+    "Takes n random individuals from coll"
+    (if (>= n (count coll))
+      (distinct coll)
+      (take n (distinct (repeatedly #(rand-nth coll))))))
 
 (defn evaluate-new
     [program terminals]
@@ -26,13 +39,23 @@
       :else program))
 
 (defn gentree-new
-    ([width max-depth] (gentree-new width max-depth (vector) 0))
-    ([width max-depth program depth]
-    (if (or (>= depth max-depth) (= 0 (rand-int (* 2 (- max-depth depth)))))
-      (rand-nth *terminators*)
-      {:fn (rand-nth *operators*)
-       :depth depth
-       :args (vec (map (fn [_] (gentree-new width max-depth program (inc depth))) (range width)))})))
+    "Generates a new tree
+
+    Uses the max-arity is a operator does not specify a specific arity. Method can be either
+    'full' or 'grow'. 'grow' allows for leaves to be selected early."
+    ([max-arity max-depth method] (gentree-new max-arity max-depth method (vector) 0))
+    ([max-arity max-depth method program depth]
+    (if (or (>= depth max-depth)
+            (and (= method "grow")
+                 (< (rand) (/ (count *terminals*) (+ (count *terminals*) (count *operators*))))))
+      (rand-nth *terminals*)
+      (let [selected-operator (rand-nth *operators*)]
+          {:fn (:fn selected-operator)
+           :depth depth
+           :args (vec (map (fn [_] (gentree-new max-arity max-depth method program (inc depth)))
+                      (if (number? (:arity selected-operator))
+                        (range (:arity selected-operator))
+                        (range (+ (:min-arity selected-operator) (rand-int (- max-arity 1)))))))}))))
 
 (defn program-zip
     "Zippers an individual program into a traversable tree"
@@ -42,20 +65,6 @@
         #(:args %)
         (fn [node children] (assoc node :args children))
         program))
- 
-(defn mutate-new
-    [tree & {:keys [mutation_rate max-mutations depth width]
-             :or   {mutation_rate 0.15 max-mutations 2 depth 2 width 2}}]
-    (loop [zipped (program-zip tree)
-             remaining max-mutations]
-        (if (zip/end? zipped)
-          (zip/root zipped)
-          ; Decide whether to mutate the subtree
-          (if (and (> remaining 0) (< (rand) mutation_rate))
-              (recur (zip/next
-                  (zip/replace zipped (gentree-new ((fnil max 0) (:depth (zip/node zipped)) 0) width)))
-                  (dec remaining))
-              (recur (zip/next zipped) remaining)))))
 
 (defn flatten-program
     [program]
@@ -64,24 +73,28 @@
       (if (zip/end? fp)
        nodelist
        (recur (zip/next fp) (conj nodelist fp)))))
-    
+  
 (defn random-subtree
     [program]
-    (zip/node (rand-nth (flatten-program program))))
+    (rand-nth (flatten-program program)))
 
+(defn mutate-new
+    [tree & {:keys [mutation_rate depth width]
+             :or   {mutation_rate 0.15 depth 2 width 2}}]
+    (let [subtree (random-subtree tree)]
+        (zip/root (zip/replace subtree
+                       (gentree-new width
+                                    (- depth
+                                       ((fnil min depth)
+                                        (:depth (-> subtree zip/node))))
+                                    (if (< (rand) 0.5) "full" "grow"))))))
+   
 (defn crossover-new 
     "Produces a crossover between mommy and daddy
     Still needs to handle the case where depths are different"
-    [mommy daddy & {:keys [mutation_rate]
-                    :or   {mutation_rate 0.25}}]
-    (loop [zipped (program-zip mommy)]
-        (if (zip/end? zipped)
-            (zip/root zipped)
-            (if (< (rand) mutation_rate)
-              (recur (zip/next
-                  (zip/replace zipped (random-subtree daddy))))
-              (recur (zip/next zipped))))))
-
+    [mommy daddy]
+    (zip/root (zip/replace (random-subtree mommy) (zip/node (random-subtree daddy)))))
+        
 (defn generate-population
     [size depth width]
     (vec (repeatedly size #(gentree-new depth width))))
