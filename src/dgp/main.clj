@@ -10,7 +10,7 @@
                    {:fn + :min-arity 2}
                    {:fn * :min-arity 2}])
 
-(def *terminals* (conj (range 1 9) :a :b))
+(def *terminals* (conj (range 1 15) :a :b))
 
 (defn count-terminals
     "Counts the number of terminals in a program"
@@ -22,10 +22,11 @@
     [program]
     (count (filter #(ifn? %) (flatten program))))
 
-(defn take-random [n coll]
+(defn take-random 
     "Takes n random individuals from coll"
-    (if (>= n (count coll))
-      (distinct coll)
+    [n coll]
+    (if (>= n (count (distinct coll)))
+      (seq coll)
       (take n (distinct (repeatedly #(rand-nth coll))))))
 
 (defn evaluate-new
@@ -47,21 +48,22 @@
     ([max-arity max-depth method program depth]
     (if (or (>= depth max-depth)
             (and (= method "grow")
+                 (> depth 0)
                  (< (rand) (/ (count *terminals*) (+ (count *terminals*) (count *operators*))))))
       (rand-nth *terminals*)
       (let [selected-operator (rand-nth *operators*)]
           {:fn (:fn selected-operator)
            :depth depth
-           :args (vec (map (fn [_] (gentree-new max-arity max-depth method program (inc depth)))
+           :args (map (fn [_] (gentree-new max-arity max-depth method program (inc depth)))
                       (if (number? (:arity selected-operator))
                         (range (:arity selected-operator))
-                        (range (+ (:min-arity selected-operator) (rand-int (- max-arity 1)))))))}))))
+                        (range (+ (:min-arity selected-operator) (rand-int (- max-arity 1))))))}))))
 
 (defn program-zip
     "Zippers an individual program into a traversable tree"
     [program]
     (zip/zipper
-        #(vector? (:args %))
+        #(sequential? (:args %))
         #(:args %)
         (fn [node children] (assoc node :args children))
         program))

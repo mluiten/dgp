@@ -28,9 +28,9 @@
 (imp/import-io)
 (imp/import-mapreduce)
 
-(def *individuals-per-mapper* 5000)
+(def *individuals-per-mapper* 1000)
 (def *tournaments* 50)
-(def *tournament-size* 150)
+(def *tournament-size* 100)
 
 (def *operations* [
     {:action 'mutate :p 0.2}
@@ -73,27 +73,26 @@
   "First selects which kind of operation should be executed on this tournament. Then
   finds the best candidates from the pool and performs crossover, mutation, or whatever
   operation is selected."
-  (let [sorted-values (sort values)]
+  (let [sorted-values (sort values)
+        deme-size (/ (* *individuals-per-mapper* 10) *tournaments*)]
   (do 
     (ds/with-out-append-writer (str "best-" (.getValue (ctx/get-counter "Generations" "Current")) ".txt")
       (println "DM:" key "AVG:" (average (map first (take 25 sorted-values))) "BEST:" (first sorted-values)))
-    (vec (let [p (rand)
-               *deme-size* (/ (* *individuals-per-mapper* 10) *tournaments*)]
-      (cond 
-         (and (< 0.25 p 1.00) (>= (count values) 2)) 
-           (do
-            (ctx/increment-counter "GP Operations" "Crossover")
-            (vec (repeatedly *deme-size*
-                             (fn [] (vec [(str (apply crossover-new (map #(read-string (second %)) (take 2 (sort (take-random *tournament-size* sorted-values)))))) -1])))))
-         (< p 0.25)
-           (do
-            (ctx/increment-counter "GP Operations" "Mutation")
-            (vec (repeatedly *deme-size*
-                (fn [] (vec [(str (mutate-new (read-string (second (first (sort (take-random *tournament-size* sorted-values))))) :width 3 :depth 4)) -1])))))
-         :else
-           (do
-            (ctx/increment-counter "GP Operations" "Survival")
-            sorted-values)))))))
+    (vec (repeatedly deme-size
+         (fn [] (let [p (rand)]
+           (cond 
+             (and (< 0.25 p 1.00) (>= (count values) 2)) 
+               (do
+                (ctx/increment-counter "GP Operations" "Crossover")
+                (vec [(str (apply crossover-new (map #(read-string (second %)) (take 2 (sort (take-random *tournament-size* sorted-values)))))) -1]))
+             (< p 0.25)
+               (do
+                (ctx/increment-counter "GP Operations" "Mutation")
+                (vec [(str (mutate-new (read-string (second (first (sort (take-random *tournament-size* sorted-values))))) :width 3 :depth 4)) -1]))
+             :else
+               (do
+                (ctx/increment-counter "GP Operations" "Survival")
+                (first sorted-values))))))))))
 
 (defn long-string-writer [^TaskInputOutputContext context key value]
   (.write context (LongWritable. key) (Text. value)))
@@ -122,6 +121,18 @@
   :input input
   :map-reader wrap/clojure-map-reader)
 
+(define-source :seq [input]
+  :input-format :seq
+  :input input
+  :map-reader wrap/clojure-map-reader)
+
+(define-sink :seq [output]
+  :output-format :seq
+  :output output
+  :output-key Text
+  :output-value Text
+  :reduce-writer wrap/clojure-writer)
+
 (define-source :random []
     :input-format RandomInputFormat
     :map-reader wrap/clojure-map-reader
@@ -135,15 +146,15 @@
 (define-step generate-population-step []
     :source :random
     :map dgp-map-generate-individuals
-    :sink (:text "/tmp/generation-0")
+    :sink (:seq "/tmp/generation-0")
     :replace true
     :compress-output false
     :reduce :none)
 
 (define-step evaluate-step [generation]
-    :source (:my-text (str "/tmp/generation-" generation))
+    :source (:seq (str "/tmp/generation-" generation))
     :map dgp-map-evaluate
-    :sink (:text (str "/tmp/generation-" (inc generation)))
+    :sink (:seq (str "/tmp/generation-" (inc generation)))
     :replace true                   ; Should generate a new dir for each generation
     :shuffle :long-string
     :reduce dgp-reduce
