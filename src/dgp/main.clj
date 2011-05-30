@@ -3,14 +3,18 @@
             [clojure.contrib.io :as io]))
 
 (defn log
+    "Protected version of the natural log"
     [arg]
-    (Math/log arg))
+    (if (>= arg 1)
+        (Math/log arg)
+        1))
 
 (def *operators* `[{:fn - :min-arity 2}
                    {:fn + :min-arity 2}
-                   {:fn * :min-arity 2}])
+                   {:fn * :min-arity 2}
+                   {:fn log :arity 1}])
 
-(def *terminals* (conj (range 1 15) :a :b))
+(def *terminals* (concat (range 1 10) [:a]))
 
 (defn count-terminals
     "Counts the number of terminals in a program"
@@ -34,7 +38,7 @@
     (cond
       (keyword? program) (program terminals)
       (map? program)
-          (apply (eval (:fn program))
+          (apply (resolve (:fn program))
                  (map #(evaluate-new % terminals)
                       (:args program)))
       :else program))
@@ -80,22 +84,47 @@
     [program]
     (rand-nth (flatten-program program)))
 
+(defn rebase-depth
+    "Reconfigured the depth of a (sub)tree"
+    [individual base-depth]
+    (if (not (map? individual))
+        individual
+        (loop [zipped (program-zip individual)]
+            (if (zip/end? zipped)
+                (zip/root zipped)
+                (if (map? (zip/node zipped))
+                    (recur (zip/next (zip/replace zipped (into (zip/node zipped) {:depth (+ base-depth (count (zip/path zipped)))}))))
+                    (recur (zip/next zipped)))))))
+
 (defn mutate-new
     [tree & {:keys [mutation_rate depth width]
-             :or   {mutation_rate 0.15 depth 2 width 2}}]
+             :or   {mutation_rate 0.15 depth 8 width 2}}]
     (let [subtree (random-subtree tree)]
         (zip/root (zip/replace subtree
                        (gentree-new width
-                                    (- depth
-                                       ((fnil min depth)
-                                        (:depth (-> subtree zip/node))))
-                                    (if (< (rand) 0.5) "full" "grow"))))))
-   
+                                    depth
+                                    "grow"
+                                    (vector)
+                                    (if (map? (zip/node subtree))
+                                         (:depth (zip/node subtree))
+                                         (if (not= nil (zip/up subtree))
+                                             (+ 1 (:depth (zip/node (zip/up subtree))))
+                                             0)))))))
+
 (defn crossover-new 
     "Produces a crossover between mommy and daddy
     Still needs to handle the case where depths are different"
     [mommy daddy]
-    (zip/root (zip/replace (random-subtree mommy) (zip/node (random-subtree daddy)))))
+    (let [subtree-mom (random-subtree mommy)
+          subtree-dad (random-subtree daddy)]
+        (zip/root (zip/replace
+                       subtree-mom
+                      (rebase-depth (zip/node subtree-dad)
+                                    (if (map? (zip/node subtree-mom))
+                                        (:depth (zip/node subtree-mom))
+                                        (if (not= nil (zip/up subtree-mom))
+                                            (+ 1 (:depth (zip/node (zip/up subtree-mom))))
+                                            0)))))))
         
 (defn generate-population
     [size depth width]

@@ -23,14 +23,14 @@
             [clojure.contrib.duck-streams :as ds])
   (:import (java.util StringTokenizer)
            (org.dgp RandomInputFormat))
-  (:use clojure.contrib.math clojure.test clojure-hadoop.flow clojure-hadoop.job dgp.main))
+  (:use clojure.contrib.math clojure.contrib.pprint clojure.test clojure-hadoop.flow clojure-hadoop.job dgp.main))
 
 (imp/import-io)
 (imp/import-mapreduce)
 
-(def *individuals-per-mapper* 1000)
-(def *tournaments* 50)
-(def *tournament-size* 100)
+(def *individuals-per-mapper* 2000)
+(def *tournaments* 25)
+(def *tournament-size* 10)
 
 (def *operations* [
     {:action 'mutate :p 0.2}
@@ -41,58 +41,253 @@
 (defn dgp-map-generate-individuals
     "Mapper which generates individuals using the ramped half-and-half methodology"
     [key value]
-    (let [depth 6 width 3]
-      (vec (reduce concat (repeatedly
-         (/ *individuals-per-mapper* depth)
-         (fn [] (map #(vec [(str (gentree-new width % (if (< (rand) 0.5) "grow" "full"))) -1]) (range 1 (+ 1 depth)))))))))
+    (let [depth 5 width 3]
+      (vec (reduce concat
+          (map (fn [method] (reduce concat (repeatedly
+              (/ *individuals-per-mapper* depth 2)
+              (fn [] (map #(vec [-1 (str (gentree-new width % method))]) (range 1 (+ 1 depth)))))))
+           ["grow" "full"])))))
 
-(defn objective-fn
+(def *training-set-cancer*
+ [
+    [5	1	1	1	2	1	3	1	1	2]
+    [5	4	4	5	7	10	3	2	1	2]
+    [3	1	1	1	2	2	3	1	1	2]
+    [6	8	8	1	3	4	3	7	1	2]
+    [4	1	1	3	2	1	3	1	1	2]
+    [8	10	10	8	7	10	9	7	1	4]
+    [1	1	1	1	2	10	3	1	1	2]
+    [2	1	2	1	2	1	3	1	1	2]
+    [2	1	1	1	2	1	1	1	5	2]
+    [4	2	1	1	2	1	2	1	1	2]
+    [1	1	1	1	1	1	3	1	1	2]
+    [2	1	1	1	2	1	2	1	1	2]
+    [5	3	3	3	2	3	4	4	1	4]
+    [1	1	1	1	2	3	3	1	1	2]
+    [8	7	5	10	7	9	5	5	4	4]
+    [7	4	6	4	6	1	4	3	1	4]
+    [4	1	1	1	2	1	2	1	1	2]
+    [4	1	1	1	2	1	3	1	1	2]
+    [10	7	7	6	4	10	4	1	2	4]
+    [6	1	1	1	2	1	3	1	1	2]
+    [7	3	2	10	5	10	5	4	4	4]
+    [10	5	5	3	6	7	7	10	1	4]
+    [3	1	1	1	2	1	2	1	1	2]
+    [1	1	1	1	2	1	3	1	1	2]
+    [5	2	3	4	2	7	3	6	1	4]
+    [3	2	1	1	1	1	2	1	1	2]
+    [5	1	1	1	2	1	2	1	1	2]
+    [2	1	1	1	2	1	2	1	1	2]
+    [1	1	3	1	2	1	1	1	1	2]
+    [3	1	1	1	1	1	2	1	1	2]
+    [2	1	1	1	2	1	3	1	1	2]
+    [10	7	7	3	8	5	7	4	3	4]
+    [2	1	1	2	2	1	3	1	1	2]
+    [3	1	2	1	2	1	2	1	1	2]
+    [2	1	1	1	2	1	2	1	1	2]
+    [10	10	10	8	6	1	8	9	1	4]
+    [6	2	1	1	1	1	7	1	1	2]
+    [5	4	4	9	2	10	5	6	1	4]
+    [2	5	3	3	6	7	7	5	1	4]
+    [10	4	3	1	3	3	6	5	2	4]
+    [6	10	10	2	8	10	7	3	3	4]
+    [5	6	5	6	10	1	3	1	1	4]
+    [10	10	10	4	8	1	8	10	1	4]
+    [1	1	1	1	2	1	2	1	2	2]
+    [3	7	7	4	4	9	4	8	1	4]
+    [1	1	1	1	2	1	2	1	1	2]
+    [4	1	1	3	2	1	3	1	1	2]
+    [7	8	7	2	4	8	3	8	2	4]
+    [9	5	8	1	2	3	2	1	5	4]
+    [5	3	3	4	2	4	3	4	1	4]
+    [10	3	6	2	3	5	4	10	2	4]
+    [5	5	5	8	10	8	7	3	7	4]
+    [10	5	5	6	8	8	7	1	1	4]
+    [10	6	6	3	4	5	3	6	1	4]
+    [8	10	10	1	3	6	3	9	1	4]
+    [8	2	4	1	5	1	5	4	4	4]
+    [5	2	3	1	6	10	5	1	1	4]
+    [9	5	5	2	2	2	5	1	1	4]
+    [5	3	5	5	3	3	4	10	1	4]
+    [1	1	1	1	2	2	2	1	1	2]
+    [9	10	10	1	10	8	3	3	1	4]
+    [6	3	4	1	5	2	3	9	1	4]
+    [1	1	1	1	2	1	2	1	1	2]
+    [10	4	2	1	3	2	4	3	10	4]
+    [4	1	1	1	2	1	3	1	1	2]
+    [5	3	4	1	8	10	4	9	1	4]
+    [8	3	8	3	4	9	8	9	8	4]
+    [1	1	1	1	2	1	3	2	1	2]
+    [5	1	3	1	2	1	2	1	1	2]
+    [6	10	2	8	10	2	7	8	10	4]
+    [1	3	3	2	2	1	7	2	1	2]
+    [9	4	5	10	6	10	4	8	1	4]
+    [10	6	4	1	3	4	3	2	3	4]
+    [1	1	2	1	2	2	4	2	1	2]
+    [1	1	4	1	2	1	2	1	1	2]
+    [5	3	1	2	2	1	2	1	1	2]
+    [3	1	1	1	2	3	3	1	1	2]
+    [2	1	1	1	3	1	2	1	1	2]
+    [2	2	2	1	1	1	7	1	1	2]
+    [4	1	1	2	2	1	2	1	1	2]
+    [5	2	1	1	2	1	3	1	1	2]
+    [3	1	1	1	2	2	7	1	1	2]
+    [3	5	7	8	8	9	7	10	7	4]
+    [5	10	6	1	10	4	4	10	10	4]
+    [3	3	6	4	5	8	4	4	1	4]
+    [3	6	6	6	5	10	6	8	3	4]
+    [4	1	1	1	2	1	3	1	1	2]
+    [2	1	1	2	3	1	2	1	1	2]
+    [1	1	1	1	2	1	3	1	1	2]
+    [3	1	1	2	2	1	1	1	1	2]
+    [4	1	1	1	2	1	3	1	1	2]
+    [1	1	1	1	2	1	2	1	1	2]
+    [2	1	1	1	2	1	3	1	1	2]
+    [1	1	1	1	2	1	3	1	1	2]
+    [2	1	1	2	2	1	1	1	1	2]
+    [5	1	1	1	2	1	3	1	1	2]
+    [9	6	9	2	10	6	2	9	10	4]
+    [7	5	6	10	5	10	7	9	4	4]
+    [10	3	5	1	10	5	3	10	2	4]
+    [2	3	4	4	2	5	2	5	1	4]
+    [4	1	2	1	2	1	3	1	1	2]
+    [8	2	3	1	6	3	7	1	1	4]
+    [10	10	10	10	10	1	8	8	8	4]
+    [7	3	4	4	3	3	3	2	7	4]
+    [10	10	10	8	2	10	4	1	1	4]
+    [1	6	8	10	8	10	5	7	1	4]
+    [1	1	1	1	2	1	2	3	1	2]
+    [6	5	4	4	3	9	7	8	3	4]
+    [1	3	1	2	2	2	5	3	2	2]
+    [8	6	4	3	5	9	3	1	1	4]
+    [10	3	3	10	2	10	7	3	3	4]
+    [10	10	10	3	10	8	8	1	1	4]
+    [3	3	2	1	2	3	3	1	1	2]
+    [1	1	1	1	2	5	1	1	1	2]
+    [8	3	3	1	2	2	3	2	1	2]
+    [4	5	5	10	4	10	7	5	8	4]
+    [1	1	1	1	4	3	1	1	1	2]
+    [3	2	1	1	2	2	3	1	1	2]
+    [1	1	2	2	2	1	3	1	1	2]
+    [4	2	1	1	2	2	3	1	1	2]
+    [10	10	10	2	10	10	5	3	3	4]
+    [5	3	5	1	8	10	5	3	1	4]
+    [5	4	6	7	9	7	8	10	1	4]
+    [1	1	1	1	2	1	2	1	1	2]
+    [7	5	3	7	4	10	7	5	5	4]
+    [3	1	1	1	2	1	3	1	1	2]
+    [8	3	5	4	5	10	1	6	2	4]
+    [1	1	1	1	10	1	1	1	1	2]
+    [5	1	3	1	2	1	2	1	1	2]
+    [2	1	1	1	2	1	3	1	1	2]
+    [5	10	8	10	8	10	3	6	3	4]
+    [3	1	1	1	2	1	2	2	1	2]
+    [3	1	1	1	3	1	2	1	1	2]
+    [5	1	1	1	2	2	3	3	1	2]
+    [4	1	1	1	2	1	2	1	1	2]
+    [3	1	1	1	2	1	1	1	1	2]
+    [4	1	2	1	2	1	2	1	1	2]
+    [3	1	1	1	2	1	1	1	1	2]
+    [2	1	1	1	2	1	1	1	1	2]
+    [9	5	5	4	4	5	4	3	3	4]
+    [1	1	1	1	2	5	1	1	1	2]
+    [2	1	1	1	2	1	2	1	1	2]
+    [3	4	5	2	6	8	4	1	1	4]
+    [1	1	1	1	3	2	2	1	1	2]
+    [3	1	1	3	8	1	5	8	1	2]
+    [8	8	7	4	10	10	7	8	7	4]
+    [1	1	1	1	1	1	3	1	1	2]
+    [7	2	4	1	6	10	5	4	3	4]
+    [10	10	8	6	4	5	8	10	1	4]
+    [4	1	1	1	2	3	1	1	1	2]
+    [1	1	1	1	2	1	1	1	1	2]
+    [5	5	5	6	3	10	3	1	1	4]
+ ])
+
+(def *validation-fold* (atom 0))
+
+(def *training-set-math*
+    (vec (map #(vec [% (- (+ (* % %) (log (+ % 3))) (+ 5 (* % % %) (+ % (* 8 %))))])
+              (range 10 30))))
+
+(def *validation-set-math*
+    (vec (map #(vec [% (- (+ (* % %) (log (+ % 3))) (+ 5 (* % % %) (+ % (* 8 %))))])
+              (range 30 35))))
+
+(defn objective-fn-math
   [individual]
-  (reduce +
-      (map (fn [i] (expt (-
-                           (- (+ 5 (* i i) (+ i (* 8 i))) i (+ i 2))   ; Find this function :-)
-                           (evaluate-new individual {:a i :b i}))
-                         2))
-          (range 25))))
+  (* (/ (reduce +
+               (map (fn [i]
+                     (expt
+                       (- (second i)   ; Find this function :-)
+                          (evaluate-new individual {:a (first i)})) 2))
+                    *training-set-math*))
+         (count *training-set-math*))
+  (/ (sqrt (count (flatten-program individual)))
+     (count *training-set-math*))))
+
+(defn objective-fn-cancer
+  [individual]
+  (sqrt
+    (/ (reduce +
+               (map (fn [i]
+                     (expt
+                       (- (last i)   ; Find this function :-)
+                          (evaluate-new individual (apply hash-map (interleave [:a :b :c :d :e :f :g :h :i] (subvec i 0 9)))))
+                       2))
+                    *training-set-cancer*))
+    (count *training-set-cancer*))))
 
 (defn dgp-map-evaluate
   [offset individual]
   "Map evaluates the given individual with the training set and assigns a tournament
   number, so we basicly do tournament selection. The reducer can than decide what to
   do with a certain tournament as to evolve the population"
-  (do 
-    [[(rand-int *tournaments*)
-     (str [(objective-fn (read-string individual))
-          (str individual)])]]))
+  (let [fitness (objective-fn-math (read-string individual))] 
+      [[(rand-int *tournaments*)
+        (str [fitness (str individual)])]]))
 
 (defn average
   [coll]
-  (quot (apply + coll) (count coll)))
+  (/ (apply + coll) (count coll)))
+
+(defn- sort-and-filter
+  [values]
+  (sort (filter #(number? (first %)) values)))
 
 (defn dgp-reduce [key values]
   "First selects which kind of operation should be executed on this tournament. Then
   finds the best candidates from the pool and performs crossover, mutation, or whatever
   operation is selected."
-  (let [sorted-values (sort values)
+  (let [sorted-values (sort-and-filter values)
         deme-size (/ (* *individuals-per-mapper* 10) *tournaments*)]
   (do 
-    (ds/with-out-append-writer (str "best-" (.getValue (ctx/get-counter "Generations" "Current")) ".txt")
-      (println "DM:" key "AVG:" (average (map first (take 25 sorted-values))) "BEST:" (first sorted-values)))
+    (ds/with-out-append-writer "best.txt"
+      (ctx/with-context
+        (println (.getJobName ctx/*context*) "\t"
+             key "\t"
+             (double (average (map first (take 10 sorted-values)))) "\t"
+             (Math/log1p (/ (reduce +
+                        (map #(abs (- (second %)
+                                       (evaluate-new (read-string (second (first sorted-values))) {:a (first %)})))
+                             *validation-set-math*))
+                (count *validation-set-math*))) "\t"
+             (second (first sorted-values)))))
     (vec (repeatedly deme-size
          (fn [] (let [p (rand)]
            (cond 
-             (and (< 0.25 p 1.00) (>= (count values) 2)) 
+             (and (< 0.15 p 1.00) (>= (count values) 2)) 
                (do
                 (ctx/increment-counter "GP Operations" "Crossover")
-                (vec [(str (apply crossover-new (map #(read-string (second %)) (take 2 (sort (take-random *tournament-size* sorted-values)))))) -1]))
-             (< p 0.25)
+                (vec [-1 (str (apply crossover-new (map #(read-string (second %)) (repeatedly 2 #(first (sort (take-random *tournament-size* sorted-values)))))))]))
+             (< 0.10 p 0.15)
                (do
                 (ctx/increment-counter "GP Operations" "Mutation")
-                (vec [(str (mutate-new (read-string (second (first (sort (take-random *tournament-size* sorted-values))))) :width 3 :depth 4)) -1]))
+                (vec [-1 (str (mutate-new (read-string (second (first (sort (take-random *tournament-size* sorted-values))))) :width 3 :depth 7))]))
              :else
                (do
                 (ctx/increment-counter "GP Operations" "Survival")
-                (first sorted-values))))))))))
+                (vec [-1 (second (first (sort (take-random *tournament-size* sorted-values))))]))))))))))
 
 (defn long-string-writer [^TaskInputOutputContext context key value]
   (.write context (LongWritable. key) (Text. value)))
@@ -151,12 +346,13 @@
     :compress-output false
     :reduce :none)
 
-(define-step evaluate-step [generation]
+(define-step evaluate-step [name generation]
     :source (:seq (str "/tmp/generation-" generation))
     :map dgp-map-evaluate
     :sink (:seq (str "/tmp/generation-" (inc generation)))
     :replace true                   ; Should generate a new dir for each generation
     :shuffle :long-string
+    :name name
     :reduce dgp-reduce
     :compress-output false)
 ;
@@ -164,16 +360,18 @@
 ;    :map :identity
 ;    :sink :text
 ;    :reduce :identity)
-;
+
 (define-flow dgp-total
     [max-generations]
     (let [max-generations (Integer. max-generations)]
-      (do-step generate-population-step)
-        (loop [generation 0]
-           (if (< generation max-generations)
-               (do (do-step evaluate-step generation)
-                   (ctx/increment-counter "Generations" "Current")
-                   (recur (inc generation)))))))
+      (map (fn [fold] (do (do-step generate-population-step)
+              (loop [generation 0]
+                (if (< generation max-generations)
+                (do
+                  (reset! *validation-fold* fold) ; FIXME: Should be a configuration parameter of the job
+                  (do-step evaluate-step (str generation) generation)
+                  (recur (inc generation)))))))
+      (range 1))))
 
 (defjob/defjob generation-job
   :map dgp-map-generate-individuals
