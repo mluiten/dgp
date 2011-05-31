@@ -15,6 +15,7 @@
                    {:fn log :arity 1}])
 
 (def *terminals* (concat (range 1 10) [:a]))
+;(def *terminals* (concat (range 1 11) [:a :b :c :d :e :f :g :h :i]))
 
 (defn count-terminals
     "Counts the number of terminals in a program"
